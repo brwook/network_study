@@ -10,18 +10,17 @@
 
 #pragma pack(push, 1)
 struct EthArpPacket {
-	EthHdr eth_;
-	ArpHdr arp_;
+    EthHdr eth_;
+    ArpHdr arp_;
 };
 #pragma pack(pop)
 
 void usage() {
-	printf("syntax: send-arp-test <interface> <victim ip> <gateway ip> [<sender ip 2> <target ip 2> ...]\n");
-	printf("sample: send-arp-test wlan0 192.168.10.2 192.168.10.1\n");
+    printf("syntax: send-arp-test <interface> <victim ip> <gateway ip> [<sender ip 2> <target ip 2> ...]\n");
+    printf("sample: send-arp-test wlan0 192.168.10.2 192.168.10.1\n");
 }
 
 char* get_mac_address(char *dev);
-
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         usage();
